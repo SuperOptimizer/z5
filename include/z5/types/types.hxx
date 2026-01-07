@@ -106,6 +106,7 @@ namespace types {
                 {"raw", raw},
                 #ifdef WITH_BLOSC
                 {"blosc", blosc},
+                {"blosc2", blosc},
                 #endif
                 #ifdef WITH_ZLIB
                 {"zlib", zlib},
@@ -129,6 +130,7 @@ namespace types {
                 {"raw", raw},
                 #ifdef WITH_BLOSC
                 {"blosc", blosc},
+                {"blosc2", blosc},
                 #endif
                 #ifdef WITH_ZLIB
                 {"zlib", zlib},
@@ -221,10 +223,18 @@ namespace types {
         switch(compressor) {
             #ifdef WITH_BLOSC
             case blosc: options["codec"] = jOpts["cname"].get<std::string>();
-                        options["level"] = jOpts["clevel"].get<int>();
-                        options["shuffle"] = jOpts["shuffle"].get<int>();
+                        // clevel may be absent for codecs like openh264 that use other params (qp)
+                        options["level"] = (jOpts.find("clevel") != jOpts.end()) ? jOpts["clevel"].get<int>() : 5;
+                        // shuffle may be absent for video codecs
+                        options["shuffle"] = (jOpts.find("shuffle") != jOpts.end()) ? jOpts["shuffle"].get<int>() : 0;
                         // load blocksize with default value 0
                         options["blocksize"] = (jOpts.find("blocksize") == jOpts.end()) ? 0 : jOpts["blocksize"].get<int>();
+                        // load plugin_so path if specified (for dynamic codec plugins like openh264)
+                        if(jOpts.find("plugin_so") != jOpts.end()) {
+                            options["plugin_so"] = jOpts["plugin_so"].get<std::string>();
+                        }
+                        // load nthreads with default value 1
+                        options["nthreads"] = (jOpts.find("nthreads") == jOpts.end()) ? 1 : jOpts["nthreads"].get<int>();
                         break;
             #endif
             #ifdef WITH_ZLIB

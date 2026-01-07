@@ -32,26 +32,42 @@
 #   - BLOSC_LIBRARIES, the Blosc library path
 #   - BLOSC_FOUND, whether Blosc has been found
 
+# Prefer vendored Blosc2 if available.
+# Check for the interface target first, then static (when used as subproject with BLOSC_INSTALL=OFF)
+if(TARGET blosc2)
+  set(BLOSC_INCLUDE_DIR
+      "${CMAKE_SOURCE_DIR}/thirdparty/c-blosc2/include")
+  set(BLOSC_LIBRARIES blosc2)
+  set(BLOSC_FOUND TRUE)
+  return()
+elseif(TARGET blosc2_static)
+  set(BLOSC_INCLUDE_DIR
+      "${CMAKE_SOURCE_DIR}/thirdparty/c-blosc2/include")
+  set(BLOSC_LIBRARIES blosc2_static)
+  set(BLOSC_FOUND TRUE)
+  return()
+endif()
+
 # Find header files  
 if(BLOSC_SEARCH_HEADER_PATHS)
   find_path( 
-      BLOSC_INCLUDE_DIR blosc.h 
+      BLOSC_INCLUDE_DIR blosc2.h 
       PATHS ${BLOSC_SEARCH_HEADER_PATHS}   
       NO_DEFAULT_PATH
   )
 else()
-  find_path(BLOSC_INCLUDE_DIR blosc.h)
+  find_path(BLOSC_INCLUDE_DIR blosc2.h)
 endif()
 
 # Find library
 if(BLOSC_SEARCH_LIB_PATH)
   find_library(
-      BLOSC_LIBRARIES NAMES blosc
+      BLOSC_LIBRARIES NAMES blosc2
       PATHS ${BLOSC_SEARCH_LIB_PATH}$
       NO_DEFAULT_PATH
   )
 else()
-  find_library(BLOSC_LIBRARIES NAMES blosc)
+  find_library(BLOSC_LIBRARIES NAMES blosc2)
 endif()
 
 if(BLOSC_INCLUDE_DIR AND BLOSC_LIBRARIES)
