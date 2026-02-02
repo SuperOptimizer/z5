@@ -180,11 +180,22 @@ namespace filesystem {
 
         inline bool chunkExists(const types::ShapeType & chunkId) const {
             if(isSharded_) {
-                // Check if the shard file exists
                 auto shardIdx = shard_utils::computeShardIndex(chunkId, chunksPerShard_);
+                auto innerIdx = shard_utils::computeInnerIndex(chunkId, chunksPerShard_);
+                std::size_t linearIdx = shard_utils::linearInnerIndex(innerIdx, chunksPerShard_);
                 std::string shardKeyStr = shard_utils::shardKey(shardIdx, zarrDelimiter_.empty() ? "/" : zarrDelimiter_);
                 fs::path shardPath = handle_.path() / shardKeyStr;
-                return fs::exists(shardPath);
+
+                std::lock_guard<std::mutex> lock(globalShardMutex_);
+                auto cacheIt = shardIndexCache_.find(shardIdx);
+                if(cacheIt == shardIndexCache_.end()) {
+                    auto idx = ShardBuffer::readIndex(shardPath, numInnerChunks_, indexLocation_, indexHasCrc32c_);
+                    cacheIt = shardIndexCache_.emplace(shardIdx, std::move(idx)).first;
+                }
+                if(cacheIt->second.numChunks() == 0) {
+                    return false;  // shard file doesn't exist
+                }
+                return !cacheIt->second.isEmpty(linearIdx);
             }
             handle::Chunk chunk(handle_, chunkId, defaultChunkShape(), shape());
             return chunk.exists();
