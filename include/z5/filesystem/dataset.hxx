@@ -555,6 +555,9 @@ namespace filesystem {
                 compression::TransposeCodec codec(transposeOrder_);
                 codec.decode(tmpBuf.data(), static_cast<T*>(dataOut), chunkShape_);
             } else {
+                if(!Mixin::compressor_) {
+                    throw std::runtime_error("readChunkSharded: compressor is null for shard at " + shardPath.string());
+                }
                 util::decompress<T>(buffer, dataOut, chunkSize_, Mixin::compressor_);
                 if(needsByteSwap_) {
                     byteSwapInPlace(dataOut, chunkSize_);
