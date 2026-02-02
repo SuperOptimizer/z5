@@ -29,6 +29,8 @@ namespace handle {
         inline bool isS3() const {return false;}
         inline bool isGcs() const {return true;}
         inline bool exists() const {}
+        inline types::FileFormat fileFormat() const {return format_;}
+        types::FileFormat format_ = types::zarr_v2;
         inline bool isZarr() const {}
         const fs::path & path() const {}
         inline const std::string & bucketName() const {return bucketNameImpl();}
@@ -66,6 +68,8 @@ namespace handle {
         inline bool isS3() const {return false;}
         inline bool isGcs() const {return true;}
         inline bool exists() const {}
+        inline types::FileFormat fileFormat() const {return format_;}
+        types::FileFormat format_ = types::zarr_v2;
         inline bool isZarr() const {}
         const fs::path & path() const {}
         inline const std::string & bucketName() const {return bucketNameImpl();}
@@ -114,6 +118,8 @@ namespace handle {
         inline bool isS3() const {return false;}
         inline bool isGcs() const {return true;}
         inline bool exists() const {}
+        inline types::FileFormat fileFormat() const {return format_;}
+        types::FileFormat format_ = types::zarr_v2;
         inline bool isZarr() const {}
         const fs::path & path() const {}
         inline const std::string & bucketName() const {return bucketNameImpl();}
@@ -161,13 +167,17 @@ namespace handle {
             return dsHandle_;
         }
 
+        inline types::FileFormat fileFormat() const {
+            return dsHandle_.fileFormat();
+        }
+
         inline bool isZarr() const {
             return dsHandle_.isZarr();
         }
 
         inline bool exists() const {}
         const fs::path & path() const {}
-        
+
         inline void remove() const {
         }
 

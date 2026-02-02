@@ -14,6 +14,26 @@
 namespace z5 {
     namespace factory_detail {
         inline void getZarrDelimiter(const fs::path & root, const std::string & key, std::string & zarrDelimiter) {
+            // check for v3 first
+            const fs::path v3path = root / key / "zarr.json";
+            if(fs::exists(v3path)) {
+                nlohmann::json j;
+                std::ifstream file(v3path);
+                file >> j;
+                file.close();
+                if(j.value("node_type", "") == "array") {
+                    // v3 default delimiter is "/"
+                    zarrDelimiter = "/";
+                    if(j.find("chunk_key_encoding") != j.end()) {
+                        const auto & cke = j["chunk_key_encoding"];
+                        if(cke.find("configuration") != cke.end()) {
+                            zarrDelimiter = cke["configuration"].value("separator", std::string("/"));
+                        }
+                    }
+                    return;
+                }
+            }
+
             const fs::path path = root / key / ".zarray";
             if(!fs::exists(path)) {
                 return;
@@ -125,6 +145,39 @@ namespace z5 {
     }
 
 
+    // create a sharded dataset
+    template<class GROUP>
+    inline std::unique_ptr<Dataset> createDataset(
+        const handle::Group<GROUP> & root,
+        const std::string & key,
+        const std::string & dtype,
+        const types::ShapeType & shape,
+        const types::ShapeType & chunkShape,
+        const types::ShapeType & shardShape,
+        const std::string & compressor="raw",
+        const types::CompressionOptions & compressionOptions=types::CompressionOptions(),
+        const double fillValue=0,
+        const std::string & indexLocation="end"
+    ) {
+        DatasetMetadata metadata;
+        const types::FileFormat format = types::zarr_v3;
+        const std::string zarrDelimiter = "/";
+        createDatasetMetadata(dtype, shape, chunkShape, format,
+                              compressor, compressionOptions, fillValue,
+                              zarrDelimiter, shardShape, indexLocation, metadata);
+
+        #ifdef WITH_S3
+        if(root.isS3()) {
+            s3::handle::Dataset ds(root, key);
+            return s3::createDataset(ds, metadata);
+        }
+        #endif
+
+        filesystem::handle::Dataset ds(root, key, zarrDelimiter);
+        return filesystem::createDataset(ds, metadata);
+    }
+
+
     // dataset creation from json, because wrapping the CompressionOptions type
     // to python is very brittle
     template<class GROUP>
@@ -170,6 +223,23 @@ namespace z5 {
         filesystem::createFile(file, isZarr);
     }
 
+    template<class GROUP>
+    inline void createFile(const handle::File<GROUP> & file, const types::FileFormat format) {
+        #ifdef WITH_S3
+        if(file.isS3()) {
+            s3::createFile(file, format);
+            return;
+        }
+        #endif
+        #ifdef WITH_GCS
+        if(file.isGcs()) {
+            gcs::createFile(file, format != types::n5);
+            return;
+        }
+        #endif
+        filesystem::createFile(file, format);
+    }
+
 
     template<class GROUP>
     inline void createGroup(const handle::Group<GROUP> & root, const std::string & key) {
@@ -189,6 +259,26 @@ namespace z5 {
         #endif
         filesystem::handle::Group newGroup(root, key);
         filesystem::createGroup(newGroup, root.isZarr());
+    }
+
+    template<class GROUP>
+    inline void createGroup(const handle::Group<GROUP> & root, const std::string & key, const types::FileFormat format) {
+        #ifdef WITH_S3
+        if(root.isS3()) {
+            s3::handle::Group newGroup(root, key);
+            s3::createGroup(newGroup, format);
+            return;
+        }
+        #endif
+        #ifdef WITH_GCS
+        if(root.isGcs()) {
+            gcs::handle::Group newGroup(root, key);
+            gcs::createGroup(newGroup, format != types::n5);
+            return;
+        }
+        #endif
+        filesystem::handle::Group newGroup(root, key);
+        filesystem::createGroup(newGroup, format);
     }
 
 

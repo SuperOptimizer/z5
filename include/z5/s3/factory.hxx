@@ -39,6 +39,12 @@ namespace s3 {
                 ptr.reset(new Dataset<float>(dataset, metadata)); break;
             case types::float64:
                 ptr.reset(new Dataset<double>(dataset, metadata)); break;
+            case types::complex64:
+                ptr.reset(new Dataset<std::complex<float>>(dataset, metadata)); break;
+            case types::complex128:
+                ptr.reset(new Dataset<std::complex<double>>(dataset, metadata)); break;
+            case types::complex256:
+                ptr.reset(new Dataset<std::complex<long double>>(dataset, metadata)); break;
         }
         return ptr;
     }
@@ -73,6 +79,12 @@ namespace s3 {
                 ptr.reset(new Dataset<float>(dataset, metadata)); break;
             case types::float64:
                 ptr.reset(new Dataset<double>(dataset, metadata)); break;
+            case types::complex64:
+                ptr.reset(new Dataset<std::complex<float>>(dataset, metadata)); break;
+            case types::complex128:
+                ptr.reset(new Dataset<std::complex<double>>(dataset, metadata)); break;
+            case types::complex256:
+                ptr.reset(new Dataset<std::complex<long double>>(dataset, metadata)); break;
         }
         return ptr;
     }
@@ -85,6 +97,13 @@ namespace s3 {
         writeMetadata(file, fmeta);
     }
 
+    template<class GROUP>
+    inline void createFile(const z5::handle::File<GROUP> & file, const types::FileFormat format) {
+        file.create();
+        Metadata fmeta(format);
+        writeMetadata(file, fmeta);
+    }
+
 
     template<class GROUP>
     inline void createGroup(const z5::handle::Group<GROUP> & group, const bool isZarr) {
@@ -93,10 +112,26 @@ namespace s3 {
         writeMetadata(group, fmeta);
     }
 
+    template<class GROUP>
+    inline void createGroup(const z5::handle::Group<GROUP> & group, const types::FileFormat format) {
+        group.create();
+        Metadata fmeta(format);
+        writeMetadata(group, fmeta);
+    }
+
 
     template<class GROUP1, class GROUP2>
     inline std::string relativePath(const z5::handle::Group<GROUP1> & g1,
                                     const GROUP2 & g2) {
+        // For S3, compute relative path from nameInBucket
+        const std::string & p1 = g1.nameInBucket();
+        const std::string & p2 = g2.nameInBucket();
+        if(p2.find(p1) == 0) {
+            std::string rel = p2.substr(p1.size());
+            if(!rel.empty() && rel[0] == '/') rel = rel.substr(1);
+            return rel;
+        }
+        return p2;
     }
 
 }

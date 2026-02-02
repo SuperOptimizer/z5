@@ -37,11 +37,62 @@ namespace handle {
             return fs::exists(path_ / ".zarray");
         }
 
+        inline bool isZarrV3Dataset() const {
+            if(!pathExists()) {
+               throw std::runtime_error("Cannot infer zarr format because the dataset has not been created yet.");
+            }
+            fs::path p = path_ / "zarr.json";
+            if(!fs::exists(p)) return false;
+            // check that it contains node_type: array
+            std::ifstream f(p);
+            nlohmann::json j;
+            f >> j;
+            return j.value("node_type", "") == "array";
+        }
+
         inline bool isZarrGroup() const {
             if(!pathExists()) {
                throw std::runtime_error("Cannot infer zarr format because the group has not been created yet.");
             }
             return fs::exists(path_ / ".zgroup");
+        }
+
+        inline bool isZarrV3Group() const {
+            if(!pathExists()) {
+               throw std::runtime_error("Cannot infer zarr format because the group has not been created yet.");
+            }
+            fs::path p = path_ / "zarr.json";
+            if(!fs::exists(p)) return false;
+            std::ifstream f(p);
+            nlohmann::json j;
+            f >> j;
+            return j.value("node_type", "") == "group" || (j.value("zarr_format", 0) == 3 && j.find("node_type") == j.end());
+        }
+
+        inline types::FileFormat detectGroupFormat() const {
+            if(fs::exists(path_ / "zarr.json")) {
+                return types::zarr_v3;
+            }
+            if(fs::exists(path_ / ".zgroup")) {
+                return types::zarr_v2;
+            }
+            return types::n5;
+        }
+
+        inline types::FileFormat detectDatasetFormat() const {
+            if(fs::exists(path_ / "zarr.json")) {
+                // could be array or group - check
+                std::ifstream f(path_ / "zarr.json");
+                nlohmann::json j;
+                f >> j;
+                if(j.value("node_type", "") == "array") {
+                    return types::zarr_v3;
+                }
+            }
+            if(fs::exists(path_ / ".zarray")) {
+                return types::zarr_v2;
+            }
+            return types::n5;
         }
 
         inline void listSubDirs(std::vector<std::string> & out) const {
@@ -87,11 +138,12 @@ namespace handle {
             : BaseType(mode), HandleImpl(path) {
         }
 
-        // Implement th handle API
+        // Implement the handle API
         inline bool isS3() const {return false;}
         inline bool isGcs() const {return false;}
         inline bool exists() const {return pathExists();}
-        inline bool isZarr() const {return isZarrGroup();}
+        inline types::FileFormat fileFormat() const {return detectGroupFormat();}
+        inline bool isZarr() const {return fileFormat() != types::n5;}
         inline const fs::path & path() const {return getPath();}
 
         inline void create() const {
@@ -140,11 +192,12 @@ namespace handle {
             : BaseType(mode), HandleImpl(path) {
         }
 
-        // Implement th handle API
+        // Implement the handle API
         inline bool isS3() const {return false;}
         inline bool isGcs() const {return false;}
         inline bool exists() const {return pathExists();}
-        inline bool isZarr() const {return isZarrGroup();}
+        inline types::FileFormat fileFormat() const {return detectGroupFormat();}
+        inline bool isZarr() const {return fileFormat() != types::n5;}
         inline const fs::path & path() const {return getPath();}
 
         inline void create() const {
@@ -198,7 +251,8 @@ namespace handle {
         inline bool isS3() const {return false;}
         inline bool isGcs() const {return false;}
         inline bool exists() const {return pathExists();}
-        inline bool isZarr() const {return isZarrDataset();}
+        inline types::FileFormat fileFormat() const {return detectDatasetFormat();}
+        inline bool isZarr() const {return fileFormat() != types::n5;}
         inline const fs::path & path() const {return getPath();}
 
         inline void create() const {
@@ -240,12 +294,14 @@ namespace handle {
               const types::ShapeType & chunkShape,
               const types::ShapeType & shape) : BaseType(chunkIndices, chunkShape, shape, ds.mode()),
                                                          dsHandle_(ds),
-                                                         path_(ds.path() / getChunkKey(ds.isZarr(), ds.zarrDelimiter())){}
+                                                         path_(ds.path() / (ds.fileFormat() == types::zarr_v3
+                                                             ? getChunkKeyV3(ds.zarrDelimiter())
+                                                             : getChunkKey(ds.isZarr(), ds.zarrDelimiter()))){}
 
         // make the top level directories for a nested chunk
         inline void create() const {
             // don't need to do anything for chunks that are not nested
-            if(dsHandle_.isZarr() && dsHandle_.zarrDelimiter() != "/") {
+            if(dsHandle_.isZarr() && dsHandle_.zarrDelimiter() != "/" && dsHandle_.fileFormat() != types::zarr_v3) {
                 return;
             }
 
@@ -264,6 +320,10 @@ namespace handle {
 
         inline const Dataset & datasetHandle() const {
             return dsHandle_;
+        }
+
+        inline types::FileFormat fileFormat() const {
+            return dsHandle_.fileFormat();
         }
 
         inline bool isZarr() const {

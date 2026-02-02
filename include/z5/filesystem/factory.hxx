@@ -102,10 +102,23 @@ namespace filesystem {
         writeMetadata(file, fmeta);
     }
 
+    template<class GROUP>
+    inline void createFile(const z5::handle::File<GROUP> & file, const types::FileFormat format) {
+        file.create();
+        Metadata fmeta(format);
+        writeMetadata(file, fmeta);
+    }
+
 
     inline void createGroup(const handle::Group & group, const bool isZarr) {
         group.create();
         Metadata fmeta(isZarr);
+        writeMetadata(group, fmeta);
+    }
+
+    inline void createGroup(const handle::Group & group, const types::FileFormat format) {
+        group.create();
+        Metadata fmeta(format);
         writeMetadata(group, fmeta);
     }
 

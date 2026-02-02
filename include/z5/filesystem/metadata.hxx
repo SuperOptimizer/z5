@@ -20,11 +20,21 @@ namespace metadata_detail {
         file.close();
     }
 
-    inline bool getMetadataPath(const handle::Dataset & handle, fs::path & path) {
-        fs::path zarrPath = handle.path();
-        fs::path n5Path = handle.path();
-        zarrPath /= ".zarray";
-        n5Path /= "attributes.json";
+    inline types::FileFormat getMetadataPath(const handle::Dataset & handle, fs::path & path) {
+        fs::path zarrV3Path = handle.path() / "zarr.json";
+        fs::path zarrPath = handle.path() / ".zarray";
+        fs::path n5Path = handle.path() / "attributes.json";
+
+        // check for v3 first
+        if(fs::exists(zarrV3Path)) {
+            nlohmann::json j;
+            readMetadata(zarrV3Path, j);
+            if(j.value("node_type", "") == "array") {
+                path = zarrV3Path;
+                return types::zarr_v3;
+            }
+        }
+
         if(fs::exists(zarrPath) && fs::exists(n5Path)) {
             throw std::runtime_error("Zarr and N5 specification are not both supported");
         }
@@ -33,14 +43,24 @@ namespace metadata_detail {
         }
         const bool isZarr = fs::exists(zarrPath);
         path = isZarr ? zarrPath : n5Path;
-        return isZarr;
+        return isZarr ? types::zarr_v2 : types::n5;
     }
 }
 
     template<class GROUP>
     inline void writeMetadata(const z5::handle::File<GROUP> & handleBase, const Metadata & metadata) {
         const auto & handle = handleBase;
-        const bool isZarr = metadata.isZarr;
+
+        if(metadata.isZarrV3()) {
+            const auto path = handle.path() / "zarr.json";
+            nlohmann::json j;
+            j["zarr_format"] = 3;
+            j["node_type"] = "group";
+            metadata_detail::writeMetadata(path, j);
+            return;
+        }
+
+        const bool isZarr = metadata.isZarr();
         const auto path = handle.path() / (isZarr ? ".zgroup" : "attributes.json");
         nlohmann::json j;
         if(isZarr) {
@@ -59,7 +79,17 @@ namespace metadata_detail {
 
     template<class GROUP>
     inline void writeMetadata(const z5::handle::Group<GROUP> & handle, const Metadata & metadata) {
-        const bool isZarr = metadata.isZarr;
+
+        if(metadata.isZarrV3()) {
+            const auto path = handle.path() / "zarr.json";
+            nlohmann::json j;
+            j["zarr_format"] = 3;
+            j["node_type"] = "group";
+            metadata_detail::writeMetadata(path, j);
+            return;
+        }
+
+        const bool isZarr = metadata.isZarr();
         const auto path = handle.path() / (isZarr ? ".zgroup" : "attributes.json");
         nlohmann::json j;
         if(isZarr) {
@@ -73,7 +103,16 @@ namespace metadata_detail {
 
 
     inline void writeMetadata(const handle::Dataset & handle, const DatasetMetadata & metadata) {
-        const auto path = handle.path() / (metadata.isZarr ? ".zarray" : "attributes.json");
+
+        if(metadata.isZarrV3()) {
+            const auto path = handle.path() / "zarr.json";
+            nlohmann::json j;
+            metadata.toJson(j);
+            metadata_detail::writeMetadata(path, j);
+            return;
+        }
+
+        const auto path = handle.path() / (metadata.isZarr() ? ".zarray" : "attributes.json");
         nlohmann::json j;
         metadata.toJson(j);
         metadata_detail::writeMetadata(path, j);
@@ -82,6 +121,19 @@ namespace metadata_detail {
 
     template<class GROUP>
     inline void readMetadata(const z5::handle::Group<GROUP> & handle, nlohmann::json & j) {
+
+        // check for v3 first
+        const auto v3Path = handle.path() / "zarr.json";
+        if(fs::exists(v3Path)) {
+            nlohmann::json jTmp;
+            metadata_detail::readMetadata(v3Path, jTmp);
+            j["zarr_format"] = jTmp.value("zarr_format", 3);
+            if(jTmp.find("node_type") != jTmp.end()) {
+                j["node_type"] = jTmp["node_type"];
+            }
+            return;
+        }
+
         const bool isZarr = handle.isZarr();
         const auto path = handle.path() / (isZarr ? ".zgroup" : "attributes.json");
         nlohmann::json jTmp;
@@ -100,9 +152,9 @@ namespace metadata_detail {
     inline void readMetadata(const handle::Dataset & handle, DatasetMetadata & metadata) {
         nlohmann::json j;
         fs::path path;
-        auto isZarr = metadata_detail::getMetadataPath(handle, path);
+        auto fmt = metadata_detail::getMetadataPath(handle, path);
         metadata_detail::readMetadata(path, j);
-        metadata.fromJson(j, isZarr);
+        metadata.fromJson(j, fmt);
     }
 
 }

@@ -15,6 +15,11 @@ namespace z5 {
 namespace types {
 
     //
+    // File format
+    //
+    enum FileFormat { zarr_v2, zarr_v3, n5 };
+
+    //
     // Coordinates
     //
 
@@ -67,6 +72,23 @@ namespace types {
                                               {float32,"float32"}, {float64, "float64"}}});
             return dtypeMap;
         }
+
+        static DtypeMap & zarrV3ToDtype() {
+            static DtypeMap dtypeMap({{{"bool", uint8},
+                                       {"int8", int8}, {"int16", int16}, {"int32", int32}, {"int64", int64},
+                                       {"uint8", uint8}, {"uint16", uint16}, {"uint32", uint32}, {"uint64", uint64},
+                                       {"float32", float32}, {"float64", float64},
+                                       {"complex64", complex64}, {"complex128", complex128}}});
+            return dtypeMap;
+        }
+
+        static InverseDtypeMap & dtypeToZarrV3() {
+            static InverseDtypeMap dtypeMap({{{int8, "int8"}, {int16, "int16"}, {int32, "int32"}, {int64, "int64"},
+                                              {uint8, "uint8"}, {uint16, "uint16"}, {uint32, "uint32"}, {uint64, "uint64"},
+                                              {float32, "float32"}, {float64, "float64"},
+                                              {complex64, "complex64"}, {complex128, "complex128"}, {complex256, "complex128"}}});
+            return dtypeMap;
+        }
     };
 
 
@@ -91,7 +113,10 @@ namespace types {
         lz4,
         #endif
         #ifdef WITH_XZ
-        xz
+        xz,
+        #endif
+        #ifdef WITH_ZSTD
+        zstd
         #endif
     };
 
@@ -119,7 +144,10 @@ namespace types {
                 {"lz4", lz4},
                 #endif
                 #ifdef WITH_XZ
-                {"xz", xz}
+                {"xz", xz},
+                #endif
+                #ifdef WITH_ZSTD
+                {"zstd", zstd}
                 #endif
             }});
             return cMap;
@@ -142,6 +170,9 @@ namespace types {
                 #ifdef WITH_LZ4
                 {"lz4", lz4},
                 #endif
+                #ifdef WITH_ZSTD
+                {"zstd", zstd},
+                #endif
             }});
             return cMap;
         }
@@ -160,6 +191,9 @@ namespace types {
                 #endif
                 #ifdef WITH_LZ4
                 {lz4, "lz4"},
+                #endif
+                #ifdef WITH_ZSTD
+                {zstd, "zstd"},
                 #endif
             }});
             return cMap;
@@ -181,7 +215,10 @@ namespace types {
                 {"lz4", lz4},
                 #endif
                 #ifdef WITH_BLOSC
-                {"blosc", blosc}
+                {"blosc", blosc},
+                #endif
+                #ifdef WITH_ZSTD
+                {"zstd", zstd}
                 #endif
             }});
             return cMap;
@@ -203,7 +240,61 @@ namespace types {
                 {lz4, "lz4"},
                 #endif
                 #ifdef WITH_BLOSC
-                {blosc, "blosc"}
+                {blosc, "blosc"},
+                #endif
+                #ifdef WITH_ZSTD
+                {zstd, "zstd"}
+                #endif
+            }});
+            return cMap;
+        }
+
+        static CompressorMap & zarrV3ToCompressor() {
+            static CompressorMap cMap({{
+                {"raw", raw},
+                #ifdef WITH_BLOSC
+                {"blosc", blosc},
+                #endif
+                #ifdef WITH_ZLIB
+                {"zlib", zlib},
+                {"gzip", zlib},
+                #endif
+                #ifdef WITH_BZIP2
+                {"bzip2", bzip2},
+                #endif
+                #ifdef WITH_LZ4
+                {"lz4", lz4},
+                #endif
+                #ifdef WITH_XZ
+                {"xz", xz},
+                #endif
+                #ifdef WITH_ZSTD
+                {"zstd", zstd}
+                #endif
+            }});
+            return cMap;
+        }
+
+        static InverseCompressorMap & compressorToZarrV3() {
+            static InverseCompressorMap cMap({{
+                {raw, "raw"},
+                #ifdef WITH_BLOSC
+                {blosc, "blosc"},
+                #endif
+                #ifdef WITH_ZLIB
+                {zlib, "gzip"},
+                #endif
+                #ifdef WITH_BZIP2
+                {bzip2, "bzip2"},
+                #endif
+                #ifdef WITH_LZ4
+                {lz4, "lz4"},
+                #endif
+                #ifdef WITH_XZ
+                {xz, "xz"},
+                #endif
+                #ifdef WITH_ZSTD
+                {zstd, "zstd"}
                 #endif
             }});
             return cMap;
@@ -248,6 +339,9 @@ namespace types {
             #ifdef WITH_LZ4
             case lz4: options["level"] = jOpts["acceleration"].get<int>(); break;
             #endif
+            #ifdef WITH_ZSTD
+            case zstd: options["level"] = jOpts["level"].get<int>(); break;
+            #endif
             // raw compression has no parameters
             default: break;
         }
@@ -285,6 +379,10 @@ namespace types {
             #endif
             #ifdef WITH_LZ4
             case lz4: jOpts["acceleration"] = std::get<int>(options.at("level")); break;
+            #endif
+            #ifdef WITH_ZSTD
+            case zstd: jOpts["id"] = std::string("zstd");
+                       jOpts["level"] = std::get<int>(options.at("level")); break;
             #endif
             // raw compression has no parameters
             default: break;
@@ -394,6 +492,10 @@ namespace types {
             case xz: if(options.find("level") == options.end()){options["level"] = 6;}
                      break;
             #endif
+            #ifdef WITH_ZSTD
+            case zstd: if(options.find("level") == options.end()){options["level"] = 3;}
+                       break;
+            #endif
             // raw compression has no parameters
             default: break;
         }
@@ -417,6 +519,95 @@ namespace types {
                 std::cout << val.type_name() << std::endl;
                 throw std::runtime_error("Invalid type conversion for compression type");
             }
+        }
+    }
+
+    inline void readZarrV3CompressionOptionsFromJson(Compressor compressor,
+                                                     const nlohmann::json & codecJson,
+                                                     CompressionOptions & options) {
+        const auto & config = codecJson.value("configuration", nlohmann::json::object());
+        switch(compressor) {
+            #ifdef WITH_BLOSC
+            case blosc: {
+                        options["codec"] = config.value("cname", std::string("lz4"));
+                        options["level"] = config.value("clevel", 5);
+                        // shuffle can be string ("noshuffle","shuffle","bitshuffle") or int (0,1,2)
+                        if(config.find("shuffle") != config.end() && config["shuffle"].is_string()) {
+                            const std::string sh = config["shuffle"];
+                            if(sh == "noshuffle") options["shuffle"] = 0;
+                            else if(sh == "bitshuffle") options["shuffle"] = 2;
+                            else options["shuffle"] = 1;  // "shuffle" or default
+                        } else {
+                            options["shuffle"] = config.value("shuffle", 1);
+                        }
+                        options["blocksize"] = config.value("blocksize", 0);
+                        options["nthreads"] = config.value("nthreads", 1);
+                        break;
+                        }
+            #endif
+            #ifdef WITH_ZLIB
+            case zlib: options["level"] = config.value("level", 5);
+                       options["useZlib"] = false;
+                       break;
+            #endif
+            #ifdef WITH_BZIP2
+            case bzip2: options["level"] = config.value("level", 5); break;
+            #endif
+            #ifdef WITH_LZ4
+            case lz4: options["level"] = config.value("acceleration", 6); break;
+            #endif
+            #ifdef WITH_ZSTD
+            case zstd: options["level"] = config.value("level", 3); break;
+            #endif
+            default: break;
+        }
+    }
+
+    inline void writeZarrV3CompressionOptionsToJson(Compressor compressor,
+                                                     const CompressionOptions & options,
+                                                     nlohmann::json & codecJson) {
+        nlohmann::json config;
+        switch(compressor) {
+            #ifdef WITH_BLOSC
+            case blosc: codecJson["name"] = "blosc";
+                        config["cname"] = std::get<std::string>(options.at("codec"));
+                        config["clevel"] = std::get<int>(options.at("level"));
+                        config["shuffle"] = std::get<int>(options.at("shuffle"));
+                        config["blocksize"] = std::get<int>(options.at("blocksize"));
+                        codecJson["configuration"] = config;
+                        break;
+            #endif
+            #ifdef WITH_ZLIB
+            case zlib: codecJson["name"] = "gzip";
+                       config["level"] = std::get<int>(options.at("level"));
+                       codecJson["configuration"] = config;
+                       break;
+            #endif
+            #ifdef WITH_BZIP2
+            case bzip2: codecJson["name"] = "bzip2";
+                        config["level"] = std::get<int>(options.at("level"));
+                        codecJson["configuration"] = config;
+                        break;
+            #endif
+            #ifdef WITH_LZ4
+            case lz4: codecJson["name"] = "lz4";
+                      config["acceleration"] = std::get<int>(options.at("level"));
+                      codecJson["configuration"] = config;
+                      break;
+            #endif
+            #ifdef WITH_XZ
+            case xz: codecJson["name"] = "xz";
+                     config["level"] = std::get<int>(options.at("level"));
+                     codecJson["configuration"] = config;
+                     break;
+            #endif
+            #ifdef WITH_ZSTD
+            case zstd: codecJson["name"] = "zstd";
+                       config["level"] = std::get<int>(options.at("level"));
+                       codecJson["configuration"] = config;
+                       break;
+            #endif
+            default: break;
         }
     }
 

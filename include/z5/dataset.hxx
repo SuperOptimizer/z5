@@ -4,6 +4,7 @@
 
 #include "z5/metadata.hxx"
 #include "z5/handle.hxx"
+#include "z5/shard.hxx"
 #include "z5/types/types.hxx"
 #include "z5/util/util.hxx"
 #include "z5/util/blocking.hxx"
@@ -16,6 +17,7 @@
 #include "z5/compression/bzip2_compressor.hxx"
 #include "z5/compression/xz_compressor.hxx"
 #include "z5/compression/lz4_compressor.hxx"
+#include "z5/compression/zstd_compressor.hxx"
 
 
 namespace z5 {
@@ -27,17 +29,35 @@ namespace z5 {
         //
         // Constructor
         //
-        Dataset(const DatasetMetadata & metadata) : isZarr_(metadata.isZarr),
+        Dataset(const DatasetMetadata & metadata) : isZarr_(metadata.isZarr()),
                                                     dtype_(metadata.dtype),
                                                     shape_(metadata.shape),
                                                     chunkShape_(metadata.chunkShape),
                                                     chunkSize_(std::accumulate(chunkShape_.begin(), chunkShape_.end(), 1, std::multiplies<std::size_t>())),
                                                     zarrDelimiter_(metadata.zarrDelimiter),
-                                                    chunking_(shape_, chunkShape_)
-        {}
+                                                    chunking_(shape_, chunkShape_),
+                                                    isSharded_(metadata.isSharded),
+                                                    shardShape_(metadata.shardShape),
+                                                    indexLocation_(metadata.indexLocation),
+                                                    indexHasCrc32c_(metadata.indexHasCrc32c),
+                                                    hasCrc32c_(metadata.hasCrc32c),
+                                                    hasTranspose_(metadata.hasTranspose),
+                                                    transposeOrder_(metadata.transposeOrder),
+                                                    bytesEndian_(metadata.bytesEndian)
+        {
+            if(isSharded_) {
+                chunksPerShard_ = shard_utils::chunksPerShard(shardShape_, chunkShape_);
+                numInnerChunks_ = shard_utils::totalInnerChunks(chunksPerShard_);
+            }
+            // Detect if byte-swapping is needed
+            const uint16_t endianTest = 1;
+            const bool hostIsLittle = (*reinterpret_cast<const char*>(&endianTest) == 1);
+            needsByteSwap_ = (bytesEndian_ == "big" && hostIsLittle) ||
+                             (bytesEndian_ == "little" && !hostIsLittle);
+        }
 
-        // Destructor
-        virtual ~Dataset(){}
+        // Destructor — flush any buffered shards
+        virtual ~Dataset(){ flushShards(); }
 
         //
         // API - already implemented and SHOULD NOT be overwritten
@@ -88,6 +108,17 @@ namespace z5 {
 
         inline types::Datatype getDtype() const {return dtype_;}
         inline bool isZarr() const {return isZarr_;}
+        inline bool isSharded() const {return isSharded_;}
+        inline const types::ShapeType & shardShape() const {return shardShape_;}
+        inline const types::ShapeType & chunksPerShard() const {return chunksPerShard_;}
+        inline std::size_t numInnerChunks() const {return numInnerChunks_;}
+        inline const std::string & indexLocation() const {return indexLocation_;}
+        inline bool hasCrc32c() const {return hasCrc32c_;}
+        inline bool hasTranspose() const {return hasTranspose_;}
+        inline const std::vector<int> & transposeOrder() const {return transposeOrder_;}
+        inline const std::string & bytesEndian() const {return bytesEndian_;}
+        inline bool needsByteSwap() const {return needsByteSwap_;}
+
 
         //
         // API - MUST implement
@@ -125,6 +156,7 @@ namespace z5 {
         virtual void chunkPath(const types::ShapeType &, fs::path &) const = 0;
         virtual void removeChunk(const types::ShapeType &) const = 0;
         virtual void remove() const = 0;
+        virtual void flushShards() const {};
 
     protected:
         // private members:
@@ -136,6 +168,21 @@ namespace z5 {
         std::string zarrDelimiter_;
 
         util::Blocking chunking_;
+
+        // sharding
+        bool isSharded_ = false;
+        types::ShapeType shardShape_;
+        types::ShapeType chunksPerShard_;
+        std::size_t numInnerChunks_ = 0;
+        std::string indexLocation_ = "end";
+        bool indexHasCrc32c_ = false;
+
+        // codec pipeline
+        bool hasCrc32c_ = false;
+        bool hasTranspose_ = false;
+        std::vector<int> transposeOrder_;
+        std::string bytesEndian_ = "little";
+        bool needsByteSwap_ = false;
     };
 
 
@@ -177,6 +224,10 @@ namespace z5 {
                 #ifdef WITH_LZ4
                 case types::lz4:
                     compressor_.reset(new compression::Lz4Compressor<T>(metadata)); break;
+                #endif
+                #ifdef WITH_ZSTD
+                case types::zstd:
+                    compressor_.reset(new compression::ZstdCompressor<T>(metadata)); break;
                 #endif
             }
         }

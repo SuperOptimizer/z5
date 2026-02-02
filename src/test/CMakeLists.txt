@@ -27,6 +27,10 @@ target_link_libraries(test_factories ${TEST_LIBS} ${COMPRESSION_LIBRARIES})
 add_executable(test_attributes test_attributes.cxx)
 target_link_libraries(test_attributes ${TEST_LIBS} ${COMPRESSION_LIBRARIES})
  
+# add zarr v3 extended test (sharding, codecs)
+add_executable(test_zarr_v3_extended test_zarr_v3_extended.cxx)
+target_link_libraries(test_zarr_v3_extended ${TEST_LIBS} ${COMPRESSION_LIBRARIES})
+
 add_subdirectory(compression)
 add_subdirectory(multiarray)
 add_subdirectory(util)

@@ -43,7 +43,9 @@ namespace handle {
 
         // must impl API for all Handles
 
-        virtual bool isZarr() const = 0;
+        virtual types::FileFormat fileFormat() const = 0;
+        virtual bool isZarr() const { return fileFormat() != types::n5; }
+        virtual bool isZarrV3() const { return fileFormat() == types::zarr_v3; }
         virtual bool isS3() const = 0;
         virtual bool isGcs() const = 0;
 
@@ -125,6 +127,10 @@ namespace handle {
             static_cast<const CHUNK &>(*this).create();
         }
 
+        inline types::FileFormat fileFormat() const {
+            return static_cast<const CHUNK &>(*this).fileFormat();
+        }
+
         inline bool isZarr() const {
             return static_cast<const CHUNK &>(*this).isZarr();
         }
@@ -167,6 +173,15 @@ namespace handle {
                 std::string delimiter = "/";
                 // N5-Axis order: we need to read the chunks in reverse order
                 util::join(indices.rbegin(), indices.rend(), name, delimiter);
+            }
+            return name;
+        }
+
+        inline std::string getChunkKeyV3(const std::string & separator="/") const {
+            const auto & indices = chunkIndices();
+            std::string name = "c";
+            for(const auto & idx : indices) {
+                name += separator + std::to_string(idx);
             }
             return name;
         }
