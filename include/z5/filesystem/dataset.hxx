@@ -180,22 +180,7 @@ namespace filesystem {
 
         inline bool chunkExists(const types::ShapeType & chunkId) const {
             if(isSharded_) {
-                auto shardIdx = shard_utils::computeShardIndex(chunkId, chunksPerShard_);
-                auto innerIdx = shard_utils::computeInnerIndex(chunkId, chunksPerShard_);
-                std::size_t linearIdx = shard_utils::linearInnerIndex(innerIdx, chunksPerShard_);
-                std::string shardKeyStr = shard_utils::shardKey(shardIdx, zarrDelimiter_.empty() ? "/" : zarrDelimiter_);
-                fs::path shardPath = handle_.path() / shardKeyStr;
-
-                std::lock_guard<std::mutex> lock(globalShardMutex_);
-                auto cacheIt = shardIndexCache_.find(shardIdx);
-                if(cacheIt == shardIndexCache_.end()) {
-                    auto idx = ShardBuffer::readIndex(shardPath, numInnerChunks_, indexLocation_, indexHasCrc32c_);
-                    cacheIt = shardIndexCache_.emplace(shardIdx, std::move(idx)).first;
-                }
-                if(cacheIt->second.numChunks() == 0) {
-                    return false;  // shard file doesn't exist
-                }
-                return !cacheIt->second.isEmpty(linearIdx);
+                return chunkExistsSharded(chunkId);
             }
             handle::Chunk chunk(handle_, chunkId, defaultChunkShape(), shape());
             return chunk.exists();
@@ -576,7 +561,26 @@ namespace filesystem {
                 }
             }
 
-            return false;
+            return true;
+        }
+
+        inline bool chunkExistsSharded(const types::ShapeType & chunkId) const {
+            auto shardIdx = shard_utils::computeShardIndex(chunkId, chunksPerShard_);
+            auto innerIdx = shard_utils::computeInnerIndex(chunkId, chunksPerShard_);
+            std::size_t linearIdx = shard_utils::linearInnerIndex(innerIdx, chunksPerShard_);
+
+            std::lock_guard<std::mutex> lock(globalShardMutex_);
+            auto cacheIt = shardIndexCache_.find(shardIdx);
+            if(cacheIt == shardIndexCache_.end()) {
+                std::string shardKeyStr = shard_utils::shardKey(shardIdx, zarrDelimiter_.empty() ? "/" : zarrDelimiter_);
+                fs::path shardPath = handle_.path() / shardKeyStr;
+                auto idx = ShardBuffer::readIndex(shardPath, numInnerChunks_, indexLocation_, indexHasCrc32c_);
+                cacheIt = shardIndexCache_.emplace(shardIdx, std::move(idx)).first;
+            }
+            if(cacheIt->second.numChunks() == 0) {
+                return false;
+            }
+            return !cacheIt->second.isEmpty(linearIdx);
         }
 
     private:
